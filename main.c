@@ -7,153 +7,39 @@
 // Ain0 (D 5) PB5  1|    |8  Vcc
 // Ain3 (D 3) PB3  2|    |7  PB2 (D 2)  Ain1
 // Ain2 (D 4) PB4  3|    |6  PB1 (D 1) pwm1
-//      	  GND  4|    |5  PB0 (D 0) pwm0
+//            GND  4|    |5  PB0 (D 0) pwm0
 //                  +----+
 
+#ifdef ADC_ISR
 ISR(ADC_vect)
 {
-	// handle interrupt
-	
-}
+	// handle ADC conversion ready interrupt
+}//end ISR ADC_vect
+#endif
 
-// the prescaler is set so that timer0 ticks every 64 clock cycles, and the
-// the overflow handler is called every 256 ticks.
-#define MICROSECONDS_PER_TIMER0_OVERFLOW (clockCyclesToMicroseconds(64 * 256))
-
-// the whole number of milliseconds per timer0 overflow
-#define MILLIS_INC (MICROSECONDS_PER_TIMER0_OVERFLOW / 1000)
-
-// the fractional number of milliseconds per timer0 overflow. we shift right
-// by three to fit these numbers into a byte. (for the clock speeds we care
-// about - 8 and 16 MHz - this doesn't lose precision.)
-#define FRACT_INC ((MICROSECONDS_PER_TIMER0_OVERFLOW % 1000) >> 3)
-#define FRACT_MAX (1000 >> 3)
-
-volatile unsigned long timer0_overflow_count = 0;
-volatile unsigned long timer0_millis = 0;
-static unsigned char timer0_fract = 0;
-
-//different name, TIMER0_OVF_vect to this
-/*ISR(TIM0_OVF_vect)
+#ifdef TIM0_OVF_ISR
+ISR(TIM0_OVF_vect)
 {
-	// copy these to local variables so they can be stored in registers
-	// (volatile variables must be read from memory on every access)
-	unsigned long m = timer0_millis;
-	unsigned char f = timer0_fract;
+	// handle timer0 overflow interrupt
+}// end ISR TIM0_OVF_vect
+#endif
 
-	m += MILLIS_INC;
-	f += FRACT_INC;
-	if (f >= FRACT_MAX) {
-		f -= FRACT_MAX;
-		m += 1;
-	}
-
-	timer0_fract = f;
-	timer0_millis = m;
-	timer0_overflow_count++;
-}*/
-
-unsigned long millis()
+#ifdef TIM0_COMPA_ISR
+ISR( TIM0_COMPA_vect )
 {
-	unsigned long m;
-	uint8_t oldSREG = SREG;
+        // handle timer0 compare match interrupt
+}//end ISR TIM0_COMPA_vect
+#endif
 
-	// disable interrupts while we read timer0_millis or we might get an
-	// inconsistent value (e.g. in the middle of a write to timer0_millis)
-	cli();
-	m = timer0_millis;
-	SREG = oldSREG;
-
-	return m;
-}
-
-void delay(unsigned long ms)
+unsigned char spi_transfer(unsigned char data)
 {
-	unsigned long start = millis();
-
-	while (millis() - start <= ms);
-}
-
-int set_bit(int pos, int val)
-{
-	//val == 0 ? PORTB &= ~(1 << pos) : PORTB |= (1 << pos);
-
-	if (val == 0) {
-		// LOW
-		PORTB &= ~(1 << pos);
-	} else {
-		// HIGH
-		PORTB |= (1 << pos);
-	}
-	return 1;
-}
-
-int analogRead(uint8_t pin)
-{
-	uint8_t low, high;
-
-	// set the analog reference (high two bits of ADMUX) and select the
-	// channel (low 4 bits).  this also sets ADLAR (left-adjust result)
-	// to 0 (the default).
-	// ADMUX = (analog_reference << 6) | (pin & 0x3f); // more MUX
-	// sapo per tiny45
-	ADMUX = pin & 0x3f;
-
-	// without a delay, we seem to read from the wrong channel
-	//delay(1);
-
-	// start the conversion
-	sbi(ADCSRA, ADSC);
-
-	// ADSC is cleared when the conversion finishes
-	while (bit_is_set(ADCSRA, ADSC));
-
-	// we have to read ADCL first; doing so locks both ADCL
-	// and ADCH until ADCH is read.  reading ADCL second would
-	// cause the results of each conversion to be discarded,
-	// as ADCL and ADCH would be locked when it completed.
-	low = ADCL;
-	high = ADCH;
-
-	// combine the two bytes
-	return (high << 8) | low;
-}
-
-// Right now, PWM output only works on the pins with
-// hardware support.  These are defined in the appropriate
-// pins_*.c file.  For the rest of the pins, we default
-// to digital output.
-void analogWrite(uint8_t pin, int val)
-{
-  // We need to make sure the PWM output is enabled for those pins
-  // that support it, as we turn it off when digitally reading or
-  // writing with them.  Also, make sure the pin is in output mode
-  // for consistenty with Wiring, which doesn't require a pinMode
-  // call for the analog output pins.
-  //pinMode(pin, OUTPUT);
-
-  //Yep, only 2 PMW, Saposoft
-  	
-	if (pin == PORTB0) {
-		if (val == 0) {
-			cbi(PORTB, pin);
-		} else {
-			// connect pwm to pin on timer 0, channel A
-			sbi(TCCR0A, COM0A1);
-			// set pwm duty
-			OCR0A = val;      
-		}
-	} else if (pin == PORTB1) {
-		if (val == 0) {
-			cbi(PORTB, pin);
-		} else {
-			// connect pwm to pin on timer 0, channel B
-			sbi(TCCR1, COM1A1);
-			// set pwm duty
-			OCR1A = val;
-		}
-	}
-}
+	USIDR = data;
+  	USISR = (1<<USIOIF);
+   	do {
+      		USICR = (1<<USIWM0)|(1<<USICS1)|(1<<USICLK)|(1<<USITC);
+   	} while ((USISR & (1<<USIOIF)) == 0);
+   	return USIDR;
+}//end spi_transfer
 
 void init()
 {
@@ -161,7 +47,7 @@ void init()
 	// work there
 	sei();
 
-    // dumpt everything, and only added the 2 timers the attiny has 
+	// dumpt everything, and only added the 2 timers the attiny has 
 	// on the ATmega168, timer 0 is also used for fast hardware pwm
 	// (using phase-correct PWM would mean that timer 0 overflowed half as often
 	// resulting in different millis() behavior on the ATmega8 and ATmega168)
@@ -251,7 +137,7 @@ void init()
 	
 	// start the first conversion of ADC
 	//sbi(ADCSRA, ADSC);
-}
+}//end init
 
 int discreteHartley( int Width, float* sample, float* outputSample ) {
 	int n = 0;
@@ -275,15 +161,64 @@ int discreteHartley( int Width, float* sample, float* outputSample ) {
 	}
 	
 	return result;
-}
+} //end discreteHartley
 
 int main(void)
 {
+	/*
+	// initialize counter
+	lugeja = 100;
+	//reset the Timer Counter Control Register to its reset value
+	TCCR0B = 0;
+
+        #if F_CPU == 8000000L
+            	//set counter0 prescaler to 64
+		// 125kHz
+           	//our FCLK is 8mhz so this makes each timer tick be 8 microseconds long
+            	TCCR0B &= ~(1<< CS02); //clear
+            	TCCR0B |=  (1<< CS01); //set
+            	TCCR0B |=  (1<< CS00); //set
+        #elif F_CPU == 1000000L
+            	//set counter0 prescaler to 8
+		// 125 kHz
+            	//our F_CPU is 1mhz so this makes each timer tick be 8 microseconds long
+            	TCCR0B &= ~(1<< CS02); //clear
+            	TCCR0B |=  (1<< CS01); //set
+            	TCCR0B &= ~(1<< CS00); //clear
+        #else
+            	//unsupported clock speed
+           	//TODO: find a way to have the compiler stop compiling and bark at the user
+		#error "Please use 8 or 1 MHz"
+        #endif
+
+	// Enable Output Compare Match Interrupt
+    	TIMSK |= (1 << OCIE0A);
+    	//reset the counter to 0
+    	TCNT0  = 0;
+    	//set the compare value to any number larger than 0
+    	OCR0A = 255;
+	// Enable global interrupts
+    	sei();
+	*/
+/*
+	DDRB = 0xFF;
+	sbi(PORTB, PORTB0);
+	sbi(PORTB, PORTB1);
+	sbi(PORTB, PORTB2);
+*/
+	//( PORTB & 1 ) ? cbi( PORTB, PORTB0 ) : sbi( PORTB, PORTB0 );
+
+	while ( FALSE );
+	while ( FALSE ) {
+		sbi( PORTB, PORTB0);
+		cbi( PORTB, PORTB0);
+	}
+
 	//float* outputSample = (float*)malloc( sizeof(float) * 4 ); sin(1);
-	init();
-	sbi(DDRB, DDB0);
-	sbi(DDRB, DDB1);
-	sbi(DDRB, DDB2);
+	//init();
+	//sbi(DDRB, DDB0);
+	//sbi(DDRB, DDB1);
+	//sbi(DDRB, DDB2);
 	/*
 	DDRB  = 1<<DDB0;
 	DDRB = 1<<DDB1;
@@ -326,19 +261,59 @@ int main(void)
 		analogWrite(PORTB0, 200);
 		_delay_ms(100);
 	}*/
+
+	sbi( DDRB, DDB0 );
+	sbi( DDRB, DDB1 );
+	sbi( DDRB, DDB2 );
+
+	cbi( PORTB, PORTB0 );
+	cbi( PORTB, PORTB1 );
+	cbi( PORTB, PORTB2 );
+
+	//SPCR |= _BV(MSTR);
+  	//SPCR |= _BV(SPE);
+
+	for (;;) {
+		//spi_transfer( 'A' );
+		//spi_transfer( 'B' );
+		//spi_transfer( '0' );
+		//_delay_ms(1);
+	}
+
+	DDRB |= (1 << 0) | (0 << 4);   //0 = input, 1 = output, PB0 is output, PB4 is input 
+   	ADCSRA |= (1 << ADPS2) | (1 << ADPS1) | (0 << ADPS0);   //ADC Prescalar set to 64 - 125kHz@8MHz 
+    	ADMUX |= (1 << REFS2) | (1 << REFS1) | (0 << REFS0);    //Sets ref. voltage to 2.56v internal reference 
+    	ADMUX |= (1 << ADLAR);	// Left adjust ADC result to allow easy 8 bit reading 
+   	ADMUX |= (0 << MUX3) | (0 << MUX2) | (1 << MUX1) | (0 << MUX0);   //Selects channel ADC2 (PB4) 
+      	ADCSRA |= (1 << ADEN);  // Enable ADC 
+   	ADCSRA |= (1 << ADATE);   // Enable ADC Auto Trigger Mode 
+
+  	for (;;) {
+		// start the conversion
+		sbi(ADCSRA, ADSC);
+		// ADSC is cleared when the conversion finishes
+		while (bit_is_set(ADCSRA, ADSC));
+
+		if ( ADCH < 100 ) {
+         		PORTB |= (0 << 0); // Turn off PB0
+      		} else {
+         		PORTB &= ~(1 << 0); // Turn on PB0
+     		}
+  	}
+
 	for (;;) {
 		// blink led
-		sbi(PORTB, PORTB0);
+		cbi(PORTB, PORTB0);
 		sbi(PORTB, PORTB1);
-		cbi(PORTB, PORTB2);
+		sbi(PORTB, PORTB2);
 		_delay_ms(100);
 		sbi(PORTB, PORTB0);
 		cbi(PORTB, PORTB1);
 		sbi(PORTB, PORTB2);
 		_delay_ms(100);
-		cbi(PORTB, PORTB0);
+		sbi(PORTB, PORTB0);
 		sbi(PORTB, PORTB1);
-		sbi(PORTB, PORTB2);
+		cbi(PORTB, PORTB2);
 		_delay_ms(100);
 		cbi(PORTB, PORTB0);
 		cbi(PORTB, PORTB1);

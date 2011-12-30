@@ -1,40 +1,40 @@
 #ifndef Main_h
 #define Main_h
 
+// define mcu freuquency
+#ifndef F_CPU
+#define F_CPU 12000000L
+#endif
+
+// add libs
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <inttypes.h>
 
-#ifndef F_CPU
-#define F_CPU 8000000L
-#endif
+// define interrupts
+/*
+#define ADC_ISR 1
+#define TIMER0_OVR_ISR 1
+#define TIMER0_COMP_ISR 1
+*/
+
+#define TRUE 1
+#define FALSE 0
 
 #define sbi(ADDRESS,BIT) (ADDRESS |= (1<<BIT))
 #define cbi(ADDRESS,BIT) (ADDRESS &= ~(1<<BIT))
 
-#define interrupts() sei()
-#define noInterrupts() cli()
-
-#define clockCyclesPerMicrosecond() ( F_CPU / 1000000L )
-#define clockCyclesToMicroseconds(a) ( (a) / clockCyclesPerMicrosecond() )
-//#define microsecondsToClockCycles(a) ( (a) * clockCyclesPerMicrosecond() )
-
 // set default values for registers
 void init();
-// set bit on PORTB
-int set_bit(int, int);
-// get milliseconds
-unsigned long millis();
-// delay milliseconds
-void delay(unsigned long);
-// read ADC value
-int analogRead(uint8_t);
-// set PWM
-void analogWrite(uint8_t, int);
+// SPI send byte
+unsigned char spi_transfer( unsigned char );
+// discrete hartley transform, to transform signal into frequency spectrum
+int discreteHartley( int, float*, float* );
+// the main function
+int main( void );
 
-// fresh ADC value
-int16_t u;
-int16_t x_TP;
+// counter
+long counter;
 
 #endif
